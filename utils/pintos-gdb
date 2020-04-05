@@ -9,7 +9,8 @@ if [ -z $GDBMACROS ]; then
     echo "See pintos-gdb file to manually set variable"
 fi
 
-GDBMACROS=${GDBMACROS:-$GDBMACROS_DEFAULT}
+# GDBMACROS=${GDBMACROS:-$GDBMACROS_DEFAULT}
+GDBMACROS=/home/ubuntu/project3/utils/gdb-macros
 
 # Choose correct GDB.
 if command -v i386-elf-gdb >/dev/null 2>&1; then

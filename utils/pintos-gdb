@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Path to GDB macros file.  Customize for your site.
+###--- Change the path to point to your gdb-macros file ---###
+GDBMACROS_DEFAULT=./gdb-macros
+
+if [ -z $GDBMACROS ]; then
+    echo "!!! WARNING: GDBMACROS NOT SET. !!!"
+    echo "See pintos-gdb file to manually set variable"
+fi
+
+GDBMACROS=${GDBMACROS:-$GDBMACROS_DEFAULT}
+
+# Choose correct GDB.
+if command -v i386-elf-gdb >/dev/null 2>&1; then
+    GDB=i386-elf-gdb
+else
+    GDB=gdb
+fi
+
+# Run GDB.
+if test -f "$GDBMACROS"; then
+    exec $GDB -x "$GDBMACROS" "$@"
+else
+    echo "*** $GDBMACROS does not exist ***"
+    echo "*** Pintos GDB macros will not be available ***"
+    exec $GDB "$@"
+fi

@@ -235,29 +235,17 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 int lengthOfParsedString(char** parsedString){
   int i = 0;
   while(*(parsedString + i)){
-    //printf("%d\n",i);
-    //printf("ParsedString[%d] = %s\n",i,parsedString[i]);
     ++i;
   }
   return i;
 }
 
 void parseString(char* inputString, const char* delim, char** retString){
-  /**  char* token = strtok(inputString, delim);
-  int index = 0;
-  while(token != NULL){
-    *(retString + index++) = strdup(token);
-    token = strtok(NULL, delim);
-  }
-
-  *(retString + index) = 0;
-  // return retString;**/
   int index = 0;
   char *token, *save_ptr;
   for (token = strtok_r (inputString, delim, &save_ptr); token != NULL;
        token = strtok_r (NULL, delim, &save_ptr)){
     *(retString + index++) = token;
-    //printf ("'%s'\n", token);
   }
   *(retString + index) = 0;
 }
@@ -538,10 +526,6 @@ setup_stack (const char *cmdstr, void **esp)
 	    args_count++;
 	    int tok_len = strlen(currentToken)+1;
             padding = 4 - tok_len%4;
-	    /**if(padding != 4){
-	      tok_len += 1;
-	      padding--;
-	      }**/
 	    *esp -= tok_len;
 	    strlcpy(*esp, currentToken, tok_len);
             espchar = (char *)(*esp);
@@ -553,11 +537,6 @@ setup_stack (const char *cmdstr, void **esp)
 	    *esp = espchar;
 	  }
 	}
-	//argv0ptr = espchar;
-	//espchar--;
-	//*espchar = 0; //padding
-	//espchar--;
-	//*espchar = 0; //padding
 	*esp -=4; // null
 	espword = (uint32_t *)(*esp);
 	*espword = 0;
@@ -566,7 +545,6 @@ setup_stack (const char *cmdstr, void **esp)
 	  *espword = argsptr[k];
 	}
 	char *argvptr = espword;
-	//espword = (uint32_t *)(*esp);
 	espword--;
 	*espword = argvptr; //argv points to argv[0]
 	espword--;

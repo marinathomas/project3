@@ -38,7 +38,10 @@ process_execute (const char *command)
 {
   char *cmd_cpy;
   tid_t tid;
-
+  char *parsedcmd[10] ={'\0'};
+  int cmd_len;
+  char *cmd_temp[cmd_len];
+  
   // NOTE:
   // To see this print, make sure LOGGING_LEVEL in this file is <= L_TRACE (6)
   // AND LOGGING_ENABLE = 1 in lib/log.h
@@ -48,14 +51,18 @@ process_execute (const char *command)
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   cmd_cpy = palloc_get_page (0);
-  if (cmd_cpy == NULL)
+  if (cmd_cpy == NULL) 
     return TID_ERROR;
   strlcpy (cmd_cpy, command, PGSIZE);
-
+  cmd_len = strlen(command) + 1;
+  strlcpy(cmd_temp, command, cmd_len);
+  
   sema_init(&launched ,0); //t->launched later
   sema_init(&exiting, 0);
+
+  parseString(cmd_temp, " ", parsedcmd);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (command, PRI_DEFAULT, start_process, cmd_cpy);
+  tid = thread_create (parsedcmd[0], PRI_DEFAULT, start_process, cmd_cpy);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_cpy);
   sema_down(&launched);
@@ -225,6 +232,37 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+int lengthOfParsedString(char** parsedString){
+  int i = 0;
+  while(*(parsedString + i)){
+    //printf("%d\n",i);
+    //printf("ParsedString[%d] = %s\n",i,parsedString[i]);
+    ++i;
+  }
+  return i;
+}
+
+void parseString(char* inputString, const char* delim, char** retString){
+  /**  char* token = strtok(inputString, delim);
+  int index = 0;
+  while(token != NULL){
+    *(retString + index++) = strdup(token);
+    token = strtok(NULL, delim);
+  }
+
+  *(retString + index) = 0;
+  // return retString;**/
+  int index = 0;
+  char *token, *save_ptr;
+  for (token = strtok_r (inputString, delim, &save_ptr); token != NULL;
+       token = strtok_r (NULL, delim, &save_ptr)){
+    *(retString + index++) = token;
+    //printf ("'%s'\n", token);
+  }
+  *(retString + index) = 0;
+}
+
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -239,15 +277,23 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
+  char *parsedcmd[10] ={'\0'};
+  int cmd_len = strlen(cmdstr) + 1;
+  char cmdcpy[cmd_len];
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL)
     goto done;
   process_activate ();
 
+  //file to be opened and loaded is the first token of the cmdstr
+  // For eg if command is ls -l foo then the file is ls.
+
   /* Open executable file. */
-  char *file_name = cmdstr;
+  strlcpy (cmdcpy, cmdstr, cmd_len);
+  parseString(cmdcpy, " ", parsedcmd); 
+  char *file_name = parsedcmd[0];
   file = filesys_open (file_name);
   if (file == NULL)
     {
@@ -452,16 +498,32 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+
 /* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
+   user virtual memory. 
+   Must populate the stack with arguments. ReturnAddress: argc: argv: argv[0]: argv[1] .. argv[argc]
+   anf the actual strings
+*/
 static bool
 setup_stack (const char *cmdstr, void **esp)
 {
   uint8_t *kpage;
-  char *espchar, *argv0ptr;
+  char *espchar;
   uint32_t *espword;
   bool success = false;
-
+  char *parsedcmd[10] ={'\0'};
+  int len = strlen(cmdstr) + 1;
+  char cmd_cpy[len];
+  strlcpy (cmd_cpy, cmdstr, len);
+  parseString(cmd_cpy, " ", parsedcmd);
+  int k = 10;
+  int p;
+  char *currentToken;
+  int padding = 0;
+  int args_count = 0;
+  int no_of_tokens =  lengthOfParsedString(parsedcmd);
+  char *argsptr[10] = {'\0'};
+  
   log(L_TRACE, "setup_stack()");
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
@@ -470,26 +532,45 @@ setup_stack (const char *cmdstr, void **esp)
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success) {
 	*esp = PHYS_BASE;
-	int len = strlen(cmdstr)+1;;
-	*esp -= len;
-	strlcpy(*esp, cmdstr, len);
-	espchar = (char *)(*esp);
-	argv0ptr = espchar;
-	espchar--;
-	*espchar = 0; //padding
-	espchar--;
-	*espchar = 0; //padding
-	*esp -=6; // padding and null
+	for(k = no_of_tokens; k >=0; k--){
+	  currentToken = parsedcmd[k];
+	  if(currentToken != NULL){
+	    args_count++;
+	    int tok_len = strlen(currentToken)+1;
+            padding = 4 - tok_len%4;
+	    /**if(padding != 4){
+	      tok_len += 1;
+	      padding--;
+	      }**/
+	    *esp -= tok_len;
+	    strlcpy(*esp, currentToken, tok_len);
+            espchar = (char *)(*esp);
+            argsptr[k] = espchar;
+	    for(p = 0; p<padding; p++){
+	      espchar--;
+	      *espchar = 0;
+	    }
+	    *esp = espchar;
+	  }
+	}
+	//argv0ptr = espchar;
+	//espchar--;
+	//*espchar = 0; //padding
+	//espchar--;
+	//*espchar = 0; //padding
+	*esp -=4; // null
 	espword = (uint32_t *)(*esp);
 	*espword = 0;
-	espword--;
-	*espword = argv0ptr;
+	for(k = no_of_tokens; k>=0; k--){
+	  espword--;
+	  *espword = argsptr[k];
+	}
 	char *argvptr = espword;
-	*esp -=8;
-	espword = (uint32_t *)(*esp);
+	//espword = (uint32_t *)(*esp);
+	espword--;
 	*espword = argvptr; //argv points to argv[0]
 	espword--;
-	*espword = 1; // argc
+	*espword = args_count; // argc
 	espword--;
 	*espword = 0; // return address
 	*esp = espword;

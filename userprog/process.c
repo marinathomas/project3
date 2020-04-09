@@ -28,8 +28,10 @@ struct semaphore exiting; // really belongs to the thread struct
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+void parseString(char* inputString, const char* delim, char** retString);
+int lengthOfParsedString(char** parsedString);
 
-/* Starts a new thread running a user program loaded from
+	/* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
@@ -40,7 +42,7 @@ process_execute (const char *command)
   tid_t tid;
   char *parsedcmd[10] ={'\0'};
   int cmd_len;
-  char *cmd_temp[cmd_len];
+  char cmd_temp[cmd_len];
   
   // NOTE:
   // To see this print, make sure LOGGING_LEVEL in this file is <= L_TRACE (6)
@@ -119,6 +121,7 @@ process_wait (tid_t child_tid UNUSED)
   // wait for the child to exit and reap the child's exit status
   sema_down(&exiting);
   // here means child has exited, get child's exit status from its thread
+  return child_tid;  // Added to fix  warning: control reaches end of non-void function [-Wreturn-type]	
 }
 
 /* Free the current process's resources. */
@@ -542,11 +545,11 @@ setup_stack (const char *cmdstr, void **esp)
 	*espword = 0;
 	for(k = no_of_tokens; k>=0; k--){
 	  espword--;
-	  *espword = argsptr[k];
+	  *espword = (uint32_t)(argsptr[k]);
 	}
-	char *argvptr = espword;
+	char *argvptr = (char *)(espword);
 	espword--;
-	*espword = argvptr; //argv points to argv[0]
+	*espword = (uint32_t)(argvptr); //argv points to argv[0]
 	espword--;
 	*espword = args_count; // argc
 	espword--;

@@ -51,6 +51,14 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   
 }
 
+/*Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise.
+ Creating a new file does not open it: opening the new file is a separate operation which would require a open system call. */
+bool sys_create (char *file, unsigned initial_size){
+  
+}
+
+  
+
 /*
 Terminates the current user program, returning status to the kernel. 
 If the process's parent waits for it (see below), this is the status that will be returned.

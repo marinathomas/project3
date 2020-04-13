@@ -40,9 +40,9 @@ process_execute (const char *command)
 {
   char *cmd_cpy;
   tid_t tid;
-  char *parsedcmd[10] ={'\0'};
+  char name[16] = {'\0'};
   int cmd_len;
-  char cmd_temp[cmd_len];
+ 
   
   // NOTE:
   // To see this print, make sure LOGGING_LEVEL in this file is <= L_TRACE (6)
@@ -57,14 +57,25 @@ process_execute (const char *command)
     return TID_ERROR;
   strlcpy (cmd_cpy, command, PGSIZE);
   cmd_len = strlen(command) + 1;
-  strlcpy(cmd_temp, command, cmd_len);
   
   sema_init(&launched ,0); //t->launched later
   sema_init(&exiting, 0);
 
-  parseString(cmd_temp, " ", parsedcmd);
+  int k;
+  int z = 16;
+  if(cmd_len < 16){
+    z = cmd_len;
+  }
+  for(k=0; k<z; k++){
+    if(command[k] == ' '){
+      break;
+    } else {
+      name[k] = command[k];
+    }
+  }
+  
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (parsedcmd[0], PRI_DEFAULT, start_process, cmd_cpy);
+  tid = thread_create (name, PRI_DEFAULT, start_process, cmd_cpy);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_cpy);
   sema_down(&launched);
@@ -502,7 +513,7 @@ setup_stack (const char *cmdstr, void **esp)
   char *espchar;
   uint32_t *espword;
   bool success = false;
-  char *parsedcmd[10] ={'\0'};
+  char *parsedcmd[100] ={'\0'};
   int len = strlen(cmdstr) + 1;
   char cmd_cpy[len];
   strlcpy (cmd_cpy, cmdstr, len);
@@ -513,7 +524,7 @@ setup_stack (const char *cmdstr, void **esp)
   int padding = 0;
   int args_count = 0;
   int no_of_tokens =  lengthOfParsedString(parsedcmd);
-  char *argsptr[10] = {'\0'};
+  char *argsptr[100] = {'\0'};
   
   log(L_TRACE, "setup_stack()");
 
@@ -528,18 +539,20 @@ setup_stack (const char *cmdstr, void **esp)
 	  if(currentToken != NULL){
 	    args_count++;
 	    int tok_len = strlen(currentToken)+1;
-            padding = 4 - tok_len%4;
-	    *esp -= tok_len;
+       	    *esp -= tok_len;
 	    strlcpy(*esp, currentToken, tok_len);
             espchar = (char *)(*esp);
             argsptr[k] = espchar;
-	    for(p = 0; p<padding; p++){
-	      espchar--;
-	      *espchar = 0;
-	    }
+	   
 	    *esp = espchar;
 	  }
 	}
+       	
+	padding = len%4;
+        for(p = 0; p<padding; p++){
+          espchar--;
+          *espchar = 0;
+        }
 	*esp -=4; // null
 	espword = (uint32_t *)(*esp);
 	*espword = 0;

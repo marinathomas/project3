@@ -3,10 +3,14 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/loader.h"
+
+#define CODE_PHYS_BASE 0x08048000
 
 static void syscall_handler (struct intr_frame *);
 int sys_write (int fd, void *buffer, unsigned size);
 void sys_exit (int status);
+bool is_valid_memory_access(const void *vaddr );
 
 void syscall_init (void)
 {
@@ -17,6 +21,11 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 {
   //printf ("system call!\n");
   //thread_exit ();
+  
+  //Ensure that esp is valid
+  if(!is_valid_memory_access(f->esp)){
+      sys_exit(-1);
+  }
   uint32_t callNo;
   uint32_t *user_esp = f->esp;
   uint32_t arg1, arg2, arg3;
@@ -49,6 +58,17 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
   }
   
+}
+
+/*
+checks for validity of the address
+*/
+bool is_valid_memory_access(const void *vaddr ){
+  if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && vaddr > ((void *)CODE_PHYS_BASE)){
+    return true;
+  } else {
+    return false;
+  }
 }
 
 /*

@@ -6,9 +6,9 @@
 
 #define LOGGING_ENABLE 0
 
-#ifndef LOGGING_LEVEL
+//#ifndef LOGGING_ENABLE
 #define LOGGING_LEVEL 6
-#endif
+//#endif
 
 #define LOG_MAX_BEFORE_SIZE 67 // 50 + 17 to account for colors
 #define LOG_MAX_LOG_SIZE 256

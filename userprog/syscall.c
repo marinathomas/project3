@@ -1,12 +1,20 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/loader.h"
+#include "pagedir.h"
+
+
+#define CODE_PHYS_BASE 0x08048000
 
 static void syscall_handler (struct intr_frame *);
 int sys_write (int fd, void *buffer, unsigned size);
 void sys_exit (int status);
+bool is_valid_memory_access(const void *vaddr );
 
 void syscall_init (void)
 {
@@ -15,11 +23,14 @@ void syscall_init (void)
 
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
+  if(! is_valid_memory_access(f->esp)){
+   sys_exit(-1);
+  }
   //printf ("system call!\n");
   //thread_exit ();
   uint32_t callNo;
   uint32_t *user_esp = f->esp;
-  uint32_t arg1, arg2, arg3;
+  uint32_t arg1, arg2, arg3; //, char_esp;
   
   callNo = (uint32_t)(*user_esp);
   
@@ -31,16 +42,97 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
 
   case SYS_WRITE: //called to output to a file or STDOUT
+   
+    //char_esp = (uint32_t)user_esp;
+    //char_esp++;
+    //(uint32_t *)user_esp = char_esp;
     user_esp++;
+    if ( is_valid_memory_access(user_esp)){
+        arg1 = (uint32_t)(*user_esp);//fd
+    } else {
+      sys_exit(-1);
+      break;
+    }
+
+    user_esp++;
+    if ( is_valid_memory_access(user_esp)){
+      // arg2 = (uint32_t)(*user_esp);
+	if ((char *)user_esp == NULL){
+	  sys_exit(-1);
+	  break;
+	}
+	arg2 = (uint32_t)(*user_esp);
+    } else {
+      sys_exit(-1);
+      break;
+    }
+
+    user_esp++;
+    if ( is_valid_memory_access(user_esp)){
+        arg3 = (uint32_t)(*user_esp);//fd
+    } else {
+      sys_exit(-1);
+      break;
+    }
+
+    /** uint32_t z;
+    uint32_t temp = arg2;
+    for(z=0; z<arg3; z++){
+      if (! is_valid_memory_access((uint32_t *)temp)){
+        f->eax = 0;
+        break;
+      }
+      temp++;
+      }**/
+    f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
+    
+    /* struct thread *t = thread_current ();
+
+    if(pagedir_get_page (t->pagedir, user_esp) == NULL){
+      f->eax = 0;
+      break;
+    }
     arg1 = (uint32_t)(*user_esp);//fd
 
     user_esp++;
+    if(pagedir_get_page (t->pagedir, user_esp) == NULL){
+      f->eax = 0;
+      break;
+    }
     arg2 = (uint32_t)(*user_esp);
-
-    user_esp++;
-    arg3 = (uint32_t)(*user_esp);
+    if(pagedir_get_page (t->pagedir, (char *)user_esp) == NULL){
+      f->eax = 0;
+      break;
+    }
     
-    f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
+    user_esp++;
+    if(pagedir_get_page (t->pagedir, user_esp) == NULL){
+      f->eax = 0;
+      break;
+    }
+    arg3 = (uint32_t)(*user_esp);
+    uint32_t z;
+    for(z=0; z<arg3; z++){
+      if(pagedir_get_page (t->pagedir, (char *)user_esp+z) == NULL){
+        f->eax = 0;
+        break;
+      }
+    }
+
+    // The virtual memory region must both start and end within the
+       user address space range. 
+    if (!is_user_vaddr ((void *) arg2)
+    	|| (!is_user_vaddr ((void *) (arg2 + arg3)))){
+    // struct thread *t = thread_current ();
+    //if(pagedir_get_page (t->pagedir, arg2) == NULL){
+      f->eax = 0;
+    } else {
+      // if(strlen(arg2) > arg3){
+      //	f->eax = 0;
+      //}else {
+	f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
+	// }
+	}*/
     break;
   case SYS_EXIT:
     user_esp++;
@@ -51,6 +143,16 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   
 }
 
+/*
+checks for validity of the address
+*/
+bool is_valid_memory_access(const void *vaddr ){
+  if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && vaddr > ((void *)CODE_PHYS_BASE)){
+    return true;
+  } else {
+    return false;
+  }
+}
 /*
 Terminates the current user program, returning status to the kernel. 
 If the process's parent waits for it (see below), this is the status that will be returned.

@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
@@ -10,7 +11,7 @@
 static void syscall_handler (struct intr_frame *);
 int sys_write (int fd, void *buffer, unsigned size);
 void sys_exit (int status);
-bool is_valid_memory_access(const void *vaddr );
+bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
 
 void syscall_init (void)
 {
@@ -23,7 +24,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   //thread_exit ();
   
   //Ensure that esp is valid
-  if(!is_valid_memory_access(f->esp)){
+  struct thread *t = thread_current ();
+  
+  if(!is_valid_memory_access(t->pagedir, f->esp)){
       sys_exit(-1);
   }
   uint32_t callNo;
@@ -31,6 +34,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   uint32_t arg1, arg2, arg3;
   
   callNo = (uint32_t)(*user_esp);
+  //printf("call no %d",callNo);
   
   switch(callNo){
 
@@ -41,21 +45,48 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
   case SYS_WRITE: //called to output to a file or STDOUT
     user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+      break;
+    }
     arg1 = (uint32_t)(*user_esp);//fd
 
     user_esp++;
-    arg2 = (uint32_t)(*user_esp);
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+      break;
+    }
+    //arg2 = (uint32_t)(*user_esp);
+    void* buffer = (void*)(*((int*)user_esp));
+    if(buffer == NULL){
+      sys_exit(-1);
+      break;
+    }
 
     user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+      break;
+    } 
     arg3 = (uint32_t)(*user_esp);
     
-    f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
+    //int fd = *((int*)f->esp + 1);
+    //void* buffer = (void*)(*((int*)f->esp + 2));
+    //unsigned size = *((unsigned*)f->esp + 3);
+    
+    f->eax = sys_write((int)arg1, (char *)buffer, (unsigned )arg3);
     break;
   case SYS_EXIT:
     user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+	sys_exit(-1);
+	break;
+    }
     arg1 = (uint32_t)(*user_esp); //exit status
     sys_exit(arg1);
     break;
+  default:
+    sys_exit(-1);
   }
   
 }
@@ -63,8 +94,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 /*
 checks for validity of the address
 */
-bool is_valid_memory_access(const void *vaddr ){
-  if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && vaddr > ((void *)CODE_PHYS_BASE)){
+bool is_valid_memory_access(uint32_t *pd, const void *vaddr ){
+  if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && vaddr > ((void *)CODE_PHYS_BASE) && pagedir_get_page (pd, vaddr) != NULL){
     return true;
   } else {
     return false;

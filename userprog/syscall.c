@@ -69,11 +69,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       break;
     } 
     arg3 = (uint32_t)(*user_esp);
-    
-    //int fd = *((int*)f->esp + 1);
-    //void* buffer = (void*)(*((int*)f->esp + 2));
-    //unsigned size = *((unsigned*)f->esp + 3);
-    
+        
     f->eax = sys_write((int)arg1, (char *)buffer, (unsigned )arg3);
     break;
   case SYS_EXIT:

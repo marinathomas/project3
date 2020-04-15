@@ -1,6 +1,6 @@
-#include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -10,6 +10,7 @@
 
 static void syscall_handler (struct intr_frame *);
 int sys_write (int fd, void *buffer, unsigned size);
+//pid_t sys_exec (const char *cmd_line);
 void sys_exit (int status);
 bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
 
@@ -31,7 +32,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   }
   uint32_t callNo;
   uint32_t *user_esp = f->esp;
-  uint32_t arg1, arg2, arg3;
+  uint32_t arg1, arg2;
+  void* buffer;
   
   callNo = (uint32_t)(*user_esp);
   //printf("call no %d",callNo);
@@ -43,6 +45,20 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     shutdown_power_off();
     break;
 
+  case SYS_EXEC:
+     user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+      break;
+    }
+    
+    buffer = (void*)(*((int*)user_esp));
+    if(buffer == NULL){
+      sys_exit(-1);
+      break;
+    }
+    // f->eax = sys_exec((char *)buffer);
+    break;
   case SYS_WRITE: //called to output to a file or STDOUT
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
@@ -56,7 +72,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     }
-    //arg2 = (uint32_t)(*user_esp);
+    
     void* buffer = (void*)(*((int*)user_esp));
     if(buffer == NULL){
       sys_exit(-1);
@@ -68,9 +84,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     } 
-    arg3 = (uint32_t)(*user_esp);
+    arg2 = (uint32_t)(*user_esp);
         
-    f->eax = sys_write((int)arg1, (char *)buffer, (unsigned )arg3);
+    f->eax = sys_write((int)arg1, (char *)buffer, (unsigned )arg2);
     break;
   case SYS_EXIT:
     user_esp++;
@@ -128,3 +144,14 @@ int sys_write (int fd, void *buffer, unsigned size){
   }
   return 0;
 }
+
+/* Runs the executable whose name is given in cmd_line, passing any given arguments, and returns the new process's program id (pid).
+ Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
+ Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable. 
+ You must use appropriate synchronization to ensure this.
+pid_t sys_exec (const char *cmd_line){
+  pid_t pid = exec (cmd_line);
+  return pid;
+  }*/
+
+

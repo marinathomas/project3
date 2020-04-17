@@ -6,6 +6,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
+#include "process.h"
 
 #define CODE_PHYS_BASE 0x08048000
 
@@ -16,6 +17,8 @@ int sys_open ( char *file);
 int sys_write (int fd, void *buffer, unsigned size);
 void sys_exit (int status);
 bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
+static int get_user (const uint8_t *uaddr);
+static bool put_user (uint8_t *udst, uint8_t byte);
 
 void syscall_init (void)
 {
@@ -35,11 +38,45 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   }
   uint32_t callNo;
   uint32_t *user_esp = f->esp;
-  uint32_t fd, size;
-  void* buffer;
+  uint32_t arg1, arg2, arg3;
   
   callNo = (uint32_t)(*user_esp);
   //printf("call no %d",callNo);
+
+  // callNo == SYS_OPEN || callNo == SYS_REMOVE || callNo == SYS_EXIT || SYS_CREATE || SYS_WRITE
+  if(callNo != SYS_HALT){
+    user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+    }
+    
+    arg1 = (uint32_t)(*user_esp);
+  }
+
+  //Below if is for sys calls that needs atleast 2 arguments
+  //callNo == SYS_CREATE || callNo == SYS_WRITE
+  // i.e filter out calls that needs only one arguments
+  if( (callNo != SYS_HALT) && (callNo != SYS_OPEN) && (callNo != SYS_REMOVE) && (callNo != SYS_EXIT) ){
+    
+    user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+    }
+    arg2 = (uint32_t)(*user_esp);
+  }
+
+  //Below if statement is for sys calls that needs atleast 3 arguements
+  // ie filter out SYS_HALT, SYS_OPEN, SYS_REMOVE, SYS_EXIT
+  //And use it only for
+  //callNo == SYS_WRITE
+  if( callNo != SYS_HALT && callNo != SYS_OPEN && callNo != SYS_REMOVE && callNo != SYS_EXIT && callNo != SYS_CREATE ){
+    user_esp++;
+    if(!is_valid_memory_access(t->pagedir, user_esp)){
+      sys_exit(-1);
+    }
+    
+    arg3 = (uint32_t)(*user_esp);
+  }
   
   switch(callNo){
 
@@ -49,100 +86,68 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
     
   case SYS_CREATE:
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    buffer = (void*)(*((int*)user_esp));
-    if( buffer == NULL || !is_valid_memory_access(t->pagedir, (int *)user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    } 
-    size = (uint32_t)(*user_esp);
-    f->eax =  sys_create ((char *)buffer, size);    
+   
+    f->eax =  sys_create ((char *)arg1, (unsigned)arg2);    
     break;
 
   case SYS_OPEN:
     user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    buffer = (void*)(*((int*)user_esp));
-    if( buffer == NULL || !is_valid_memory_access(t->pagedir, (int *)user_esp)){
-      sys_exit(-1);
-      break;
-    }
     
-    f->eax =  sys_open ((char *)buffer);
+    f->eax =  sys_open ((char *)arg1);
     break;
 
   case SYS_REMOVE:
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    buffer = (void*)(*((int*)user_esp));
-    if( buffer == NULL || !is_valid_memory_access(t->pagedir, (int *)user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    
-    f->eax =  sys_remove ((char *)buffer);
+       
+    f->eax =  sys_remove ((char *)arg1);
     break;
    
   case SYS_WRITE: //called to output to a file or STDOUT
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    }
-    fd = (uint32_t)(*user_esp);//fd
 
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
+    if(get_user((uint8_t *)arg2) == -1){
       sys_exit(-1);
       break;
     }
-    
-    buffer = (void*)(*((int*)user_esp));
-    if(buffer == NULL){
-      sys_exit(-1);
-      break;
-    }
-
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
-      sys_exit(-1);
-      break;
-    } 
-    size = (uint32_t)(*user_esp);
-        
-    f->eax = sys_write((int)fd, (char *)buffer, (unsigned )size);
-    break;
-  case SYS_EXIT:
-    user_esp++;
-    if(!is_valid_memory_access(t->pagedir, user_esp)){
+    /** if(get_user((uint8_t *)arg2 + arg3)) == -1){
 	sys_exit(-1);
-	break;
-    }
-    uint32_t status = (uint32_t)(*user_esp); //exit status
-    sys_exit(status);
+	}**/
+      
+    f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
     break;
+    
+  case SYS_EXIT:
+    //uint32_t status = (uint32_t)(arg3); //exit status
+    sys_exit(arg1);
+    break;
+    
   default:
     sys_exit(-1);
   }
   
 }
 
+/* Reads a byte at user virtual address UADDR.
+UADDR must be below PHYS_BASE.
+Returns the byte value if successful, -1 if a segfault
+occurred. */
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+       : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
+/* Writes BYTE to user address UDST.
+UDST must be below PHYS_BASE.
+Returns true if successful, false if a segfault occurred. */
+static bool
+put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm ("movl $1f, %0; movb %b2, %1; 1:"
+       : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+  return error_code != -1;
+}
 
 /*
 checks for validity of the address

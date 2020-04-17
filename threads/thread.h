@@ -101,6 +101,9 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+    int nextFd;
+    
   };
 
 /* If false (default), use round-robin scheduler.

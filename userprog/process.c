@@ -85,6 +85,7 @@ process_execute (const char *command)
   sema_init(&t->exiting, 0);
   // if(cur->tid != 1){
     sema_init(&t->reaped, 0);
+    sema_init(&t->exited, 0);
     // }
   sema_down(&launched);
   
@@ -156,7 +157,9 @@ process_wait (tid_t child_tid UNUSED)
   // here means child has exited, get child's exit status from its thread
   //if(t->parent_tid != 1){
   sema_up(&child_t->reaped);
-    //}
+  // child_t->status = THREAD_DYING;
+ sema_down(&child_t->exited);
+  //}
 
   return exit_status;
 }
@@ -166,7 +169,6 @@ void
 process_exit (void)
 {
   struct thread *child_t = thread_current ();
-  tid_t tid = child_t->tid;
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
@@ -190,6 +192,9 @@ process_exit (void)
   // if(parent_t != NULL && child_t->parent_tid != 1){
     sema_up(&child_t->exiting);
    sema_down(&child_t->reaped);
+   sema_up(&child_t->exited);
+  tid_t tid = child_t->tid;
+   
    // }
 }
 

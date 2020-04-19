@@ -83,9 +83,9 @@ process_execute (const char *command)
   cur->child_tid = tid;
   t->parent_tid = cur->tid;
   sema_init(&t->exiting, 0);
-  if(cur->tid != 1){
+  // if(cur->tid != 1){
     sema_init(&t->reaped, 0);
-  }
+    // }
   sema_down(&launched);
   
   return tid;
@@ -155,7 +155,7 @@ process_wait (tid_t child_tid UNUSED)
   exit_status = child_t->exit_status;
   // here means child has exited, get child's exit status from its thread
   //if(t->parent_tid != 1){
-  //sema_up(&child_t->reaped);
+  sema_up(&child_t->reaped);
     //}
 
   return exit_status;
@@ -187,10 +187,10 @@ process_exit (void)
     }
   
   struct thread *parent_t = thread_by_id(child_t->parent_tid);
-  if(parent_t != NULL && child_t->parent_tid != 1){
+  // if(parent_t != NULL && child_t->parent_tid != 1){
     sema_up(&child_t->exiting);
-    //sema_down(&child_t->reaped);
-   }
+   sema_down(&child_t->reaped);
+   // }
 }
 
 /* Sets up the CPU for running user code in the current

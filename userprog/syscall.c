@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
+#include "devices/shutdown.h"
 
 #define CODE_PHYS_BASE 0x08048000
 

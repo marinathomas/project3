@@ -91,8 +91,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
 
   case SYS_OPEN:
-    user_esp++;
-    
+    if((char *)arg1 == NULL){
+      sys_exit(-1);
+    }
     f->eax =  sys_open ((char *)arg1);
     break;
 
@@ -103,10 +104,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
    
   case SYS_WRITE: //called to output to a file or STDOUT
 
-    if(get_user((uint8_t *)arg2) == -1){
+     if(get_user((uint8_t *)arg2) == -1){
       sys_exit(-1);
       break;
-    }
+     }
     /** if(get_user((uint8_t *)arg2 + arg3)) == -1){
 	sys_exit(-1);
 	}**/

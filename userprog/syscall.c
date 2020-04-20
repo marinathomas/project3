@@ -1,15 +1,20 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
-//#include "process.h"
+#include "threads/synch.h"
+#include "process.h"
 #include "devices/shutdown.h"
 
 #define CODE_PHYS_BASE 0x08048000
+
+static struct lock file_lock;
+
 
 static void syscall_handler (struct intr_frame *);
 bool sys_create ( char *file, unsigned initial_size);
@@ -27,6 +32,7 @@ static bool put_user (uint8_t *udst, uint8_t byte);
 void syscall_init (void)
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_init (&file_lock);
 }
 
 static void syscall_handler (struct intr_frame *f UNUSED)
@@ -92,6 +98,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     }
+     if(!is_valid_memory_access(t->pagedir, arg1)){
+      sys_exit(-1);
+    }
+    
     f->eax =  sys_create ((char *)arg1, (unsigned)arg2);    
     break;
 
@@ -100,11 +110,15 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     }
+
+     if(!is_valid_memory_access(t->pagedir, arg1)){
+      sys_exit(-1);
+    }
     f->eax =  sys_open ((char *)arg1);
     break;
 
   case SYS_READ:
-    if(arg2 == NULL){
+    if((void *)arg2 == NULL){
       sys_exit(-1);
       break;
     }
@@ -112,6 +126,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     if(arg3 !=0 && !put_user((uint8_t *)arg2,'a')){
       sys_exit(-1);
       break;
+    }
+
+    if((int)arg1 >= t->nextFd){
+      sys_exit(-1);
     }
 
     f->eax = sys_read((int)arg1, (char *)arg2, (unsigned )arg3);
@@ -123,22 +141,30 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
 
   case SYS_CLOSE:
-       
-    sys_close (arg1);
+
+    if((int)arg1 >= t->nextFd){
+      sys_exit(-1);
+    }
+
+    sys_close ((int)arg1);
     break;
 
   case SYS_FILESIZE:
        
-    f->eax = sys_filesize(arg1);
+    f->eax = sys_filesize((int)arg1);
     break;
    
   case SYS_WRITE: //called to output to a file or STDOUT
 
-     if(get_user((uint8_t *)arg2) == -1){
+    if(get_user((uint8_t *)arg2) == -1){
       sys_exit(-1);
       break;
      }
-      
+    if((int)arg1 >= t->nextFd){
+      sys_exit(-1);
+      break;
+    }
+    
     f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
     break;
     
@@ -192,7 +218,9 @@ bool is_valid_memory_access(uint32_t *pd, const void *vaddr ){
 /*Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise.
  Creating a new file does not open it: opening the new file is a separate operation which would require a open system call. */
 bool sys_create (char *file, unsigned initial_size){
+  lock_acquire (&file_lock);
   bool status = filesys_create ( file, initial_size);
+  lock_release (&file_lock);
   return status;
 }
 
@@ -200,7 +228,9 @@ bool sys_create (char *file, unsigned initial_size){
     and removing an open file does not close it. See Removing an Open File, for details.
  */
 bool sys_remove ( char *file){
+  lock_acquire (&file_lock);
   bool status = filesys_remove ( file);
+  lock_release (&file_lock);
   return status;
 }
 
@@ -213,6 +243,7 @@ bool sys_remove ( char *file){
       When a single file is opened more than once, whether by a single process or different processes, each open returns a new file descriptor. Different file descriptors for a single file are closed independently in separate calls to close and they do not share a file position.
 */
 int sys_open ( char *name){
+  lock_acquire (&file_lock);
   struct file * new_file = filesys_open (name);
   struct thread *curthread = thread_current();
 
@@ -222,18 +253,22 @@ int sys_open ( char *name){
     curthread->nextFd = cur_fd +1;
     curthread->fd_table[cur_fd] = *new_file;
   }
+  lock_release (&file_lock);
   return cur_fd;
 }
 
 /*  Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc().*/
 
 int sys_read (int fd, void *buffer, unsigned size){
-  if(fd >2){
+  int readVal = 0;
+  if(fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
     struct file  thisFile = curthread->fd_table[fd];
-    return file_read((struct file *)(&thisFile), buffer, size);
+    lock_acquire (&file_lock);
+    readVal =  file_read((struct file *)(&thisFile), buffer, size);
+    lock_release (&file_lock);
   }
-  return NULL;
+  return readVal;
 }
     
 /*
@@ -259,34 +294,47 @@ Fd 1 writes to the console. Your code to write to the console should write all o
  Otherwise, lines of text output by different processes may end up interleaved on the console, confusing both human readers and our grading scripts.
 **/
 int sys_write (int fd, void *buffer, unsigned size){
-  if( fd == 1){
+  if( fd == STDOUT_FILENO){
     //STDOUT
     putbuf(buffer, size);
     return size;
   }
-  return 0;
+  int retSize = 0;
+  if(fd > STDOUT_FILENO){
+    struct thread *curthread = thread_current();
+    struct file  wfile = curthread->fd_table[fd];
+    lock_acquire (&file_lock);
+    retSize = file_write ((struct file *)&wfile, buffer, size);
+    lock_release (&file_lock);
+  }
+  return retSize;
 }
 
 /* Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one.*/
 void sys_close (int fd){
-  if (fd > 2){
-   struct thread *curthread = thread_current();
-   struct file  thisFile = curthread->fd_table[fd];
-   file_close ((struct file *)&thisFile);
-   //curthread->fd_table[fd] = NULL;
+  if (fd > STDOUT_FILENO){
+    struct thread *curthread = thread_current();
+    struct file  thisFile = curthread->fd_table[fd];
+    lock_acquire (&file_lock);
+    file_close ((struct file *)&thisFile);
+    lock_release (&file_lock);
+    //curthread->fd_table[fd] = NULL;
   }
   
 }
 
 /* Returns the size, in bytes, of the file open as fd.*/
 int sys_filesize (int fd){
-  if (fd > 2){
+  int fileSize = 0;
+  if (fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
     struct file  thisFile = curthread->fd_table[fd];
-    return file_length ((struct file *)&thisFile);
+    lock_acquire (&file_lock);
+    fileSize =  file_length ((struct file *)&thisFile);
+    lock_release (&file_lock);
     //curthread->fd_table[fd] = NULL;
   }
-  return 0;
+  return fileSize;
 }
  
   

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -103,6 +104,7 @@ struct thread
     unsigned magic;                     /* Detects stack overflow. */
 
     int nextFd;
+    struct file fd_table[20];
     
   };
 

@@ -6,7 +6,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
-#include "process.h"
+//#include "process.h"
+#include "devices/shutdown.h"
 
 #define CODE_PHYS_BASE 0x08048000
 
@@ -14,8 +15,11 @@ static void syscall_handler (struct intr_frame *);
 bool sys_create ( char *file, unsigned initial_size);
 bool sys_remove ( char *file);
 int sys_open ( char *file);
-int sys_write (int fd, void *buffer, unsigned size);
+void sys_close( int fd);
+int sys_filesize( int fd);
 void sys_exit (int status);
+int sys_write (int fd, void *buffer, unsigned size);
+int sys_read (int fd, void *buffer, unsigned size);
 bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
@@ -27,9 +31,6 @@ void syscall_init (void)
 
 static void syscall_handler (struct intr_frame *f UNUSED)
 {
-  //printf ("system call!\n");
-  //thread_exit ();
-  
   //Ensure that esp is valid
   struct thread *t = thread_current ();
   
@@ -56,8 +57,8 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   //Below if is for sys calls that needs atleast 2 arguments
   //callNo == SYS_CREATE || callNo == SYS_WRITE
   // i.e filter out calls that needs only one arguments
-  if( (callNo != SYS_HALT) && (callNo != SYS_OPEN) && (callNo != SYS_REMOVE) && (callNo != SYS_EXIT) ){
-    
+  // if( (callNo != SYS_HALT) && (callNo != SYS_OPEN) && (callNo != SYS_REMOVE) && (callNo != SYS_EXIT) && callNo != SYS_CLOSE && CALL ){
+  if(callNo == SYS_CREATE || callNo == SYS_WRITE || callNo == SYS_READ){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
       sys_exit(-1);
@@ -68,8 +69,9 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   //Below if statement is for sys calls that needs atleast 3 arguements
   // ie filter out SYS_HALT, SYS_OPEN, SYS_REMOVE, SYS_EXIT
   //And use it only for
-  //callNo == SYS_WRITE
-  if( callNo != SYS_HALT && callNo != SYS_OPEN && callNo != SYS_REMOVE && callNo != SYS_EXIT && callNo != SYS_CREATE ){
+  //callNo == SYS_WRITE, SYS_READ
+  // if( callNo != SYS_HALT && callNo != SYS_OPEN && callNo != SYS_REMOVE && callNo != SYS_EXIT && callNo != SYS_CREATE ){
+  if(callNo == SYS_WRITE || callNo == SYS_READ){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
       sys_exit(-1);
@@ -86,20 +88,48 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
     
   case SYS_CREATE:
-   
+    if((char *)arg1 == NULL){
+      sys_exit(-1);
+      break;
+    }
     f->eax =  sys_create ((char *)arg1, (unsigned)arg2);    
     break;
 
   case SYS_OPEN:
     if((char *)arg1 == NULL){
       sys_exit(-1);
+      break;
     }
     f->eax =  sys_open ((char *)arg1);
     break;
 
+  case SYS_READ:
+    if(arg2 == NULL){
+      sys_exit(-1);
+      break;
+    }
+
+    if(arg3 !=0 && !put_user((uint8_t *)arg2,'a')){
+      sys_exit(-1);
+      break;
+    }
+
+    f->eax = sys_read((int)arg1, (char *)arg2, (unsigned )arg3);
+    break;
+   
   case SYS_REMOVE:
        
     f->eax =  sys_remove ((char *)arg1);
+    break;
+
+  case SYS_CLOSE:
+       
+    sys_close (arg1);
+    break;
+
+  case SYS_FILESIZE:
+       
+    f->eax = sys_filesize(arg1);
     break;
    
   case SYS_WRITE: //called to output to a file or STDOUT
@@ -108,9 +138,6 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
      }
-    /** if(get_user((uint8_t *)arg2 + arg3)) == -1){
-	sys_exit(-1);
-	}**/
       
     f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
     break;
@@ -187,13 +214,28 @@ bool sys_remove ( char *file){
 */
 int sys_open ( char *name){
   struct file * new_file = filesys_open (name);
-  int fd = -1;
-  if( new_file != NULL){
-    fd = 3;
+  struct thread *curthread = thread_current();
+
+  int cur_fd = -1;
+  if( (struct file *)new_file != NULL){
+    cur_fd = curthread->nextFd;
+    curthread->nextFd = cur_fd +1;
+    curthread->fd_table[cur_fd] = *new_file;
   }
-  return fd;
+  return cur_fd;
 }
 
+/*  Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc().*/
+
+int sys_read (int fd, void *buffer, unsigned size){
+  if(fd >2){
+    struct thread *curthread = thread_current();
+    struct file  thisFile = curthread->fd_table[fd];
+    return file_read((struct file *)(&thisFile), buffer, size);
+  }
+  return NULL;
+}
+    
 /*
 Terminates the current user program, returning status to the kernel. 
 If the process's parent waits for it (see below), this is the status that will be returned.
@@ -224,3 +266,27 @@ int sys_write (int fd, void *buffer, unsigned size){
   }
   return 0;
 }
+
+/* Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one.*/
+void sys_close (int fd){
+  if (fd > 2){
+   struct thread *curthread = thread_current();
+   struct file  thisFile = curthread->fd_table[fd];
+   file_close ((struct file *)&thisFile);
+   //curthread->fd_table[fd] = NULL;
+  }
+  
+}
+
+/* Returns the size, in bytes, of the file open as fd.*/
+int sys_filesize (int fd){
+  if (fd > 2){
+    struct thread *curthread = thread_current();
+    struct file  thisFile = curthread->fd_table[fd];
+    return file_length ((struct file *)&thisFile);
+    //curthread->fd_table[fd] = NULL;
+  }
+  return 0;
+}
+ 
+  

@@ -23,8 +23,8 @@
 
 #include <log.h>
 
-struct semaphore launched; // really belongs to the thread struct
-struct semaphore exiting; // really belongs to the thread struct
+//struct semaphore launched; // really belongs to the thread struct
+//struct semaphore exiting; // really belongs to the thread struct
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -57,9 +57,11 @@ process_execute (const char *command)
     return TID_ERROR;
   strlcpy (cmd_cpy, command, PGSIZE);
   cmd_len = strlen(command) + 1;
-  
-  sema_init(&launched ,0); //t->launched later
-  sema_init(&exiting, 0);
+
+  struct thread *cur = thread_current ();
+ 
+  //sema_init(&launched ,0); //t->launched later
+  //sema_init(&cur->launched, 0);
 
   int k;
   int z = 16;
@@ -78,7 +80,18 @@ process_execute (const char *command)
   tid = thread_create (name, PRI_DEFAULT, start_process, cmd_cpy);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_cpy);
-  sema_down(&launched);
+
+  //sema_down(&cur->launched);
+
+  struct thread *t = thread_by_id(tid);
+  cur->child_tid = tid;
+  t->parent_tid = cur->tid;
+  sema_init(&t->exiting, 0);
+  //sema_init(&t->launched, 0);
+  // if(cur->tid != 1){
+  sema_init(&t->reaped, 0);
+    // sema_init(&t->exited, 0);
+    // }
   
   return tid;
 }
@@ -93,7 +106,8 @@ start_process (void *command)
   bool success;
 
   log(L_TRACE, "start_process()");
-
+  //struct thread *parent_t = thread_current();
+   
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -105,7 +119,8 @@ start_process (void *command)
   palloc_free_page (executable);
   if (!success)
     thread_exit ();
-  sema_up(&launched);
+
+  //sema_up(&parent_t->launched);
   
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -130,21 +145,42 @@ int
 process_wait (tid_t child_tid UNUSED)
 {
   // wait for the child to exit and reap the child's exit status
-  sema_down(&exiting);
+  struct thread *child_t = thread_by_id(child_tid);
+  struct thread *parent_t = thread_current();
+  int exit_status;
+  enum thread_status status = child_t->status;
+  if(child_t == NULL ||child_t->parent_tid != parent_t->tid){
+    return -1;
+  }
+
+  if(parent_t->waited == true){
+    return -1;
+  }
+
+  parent_t->waited =true;
+  sema_down(&child_t->exiting);
+  exit_status = child_t->exit_status;
   // here means child has exited, get child's exit status from its thread
-  return child_tid;  // Added to fix  warning: control reaches end of non-void function [-Wreturn-type]	
+  //if(t->parent_tid != 1){
+  sema_up(&child_t->reaped);
+  // child_t->status = THREAD_DYING;
+  //sema_down(&child_t->exited);
+  //}
+ //free(child_t);
+
+  return exit_status;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
+  struct thread *child_t = thread_current ();
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = child_t->pagedir;
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -154,11 +190,19 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      child_t->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  sema_up(&exiting);
+  
+  struct thread *parent_t = thread_by_id(child_t->parent_tid);
+  // if(parent_t != NULL && child_t->parent_tid != 1){
+  sema_up(&child_t->exiting);
+  sema_down(&child_t->reaped);
+   //sema_up(&child_t->exited);
+   //tid_t tid = child_t->tid;
+   
+   // }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -176,7 +220,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 

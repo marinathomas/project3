@@ -1,13 +1,14 @@
-#include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "threads/synch.h"
+#include "threads/malloc.h"
 #include "process.h"
 #include "devices/shutdown.h"
 
@@ -23,6 +24,8 @@ int sys_open ( char *file);
 void sys_close( int fd);
 int sys_filesize( int fd);
 void sys_exit (int status);
+int sys_wait (tid_t pid);
+tid_t sys_exec (const char *cmd_line);
 int sys_write (int fd, void *buffer, unsigned size);
 int sys_read (int fd, void *buffer, unsigned size);
 bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
@@ -39,18 +42,17 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 {
   //Ensure that esp is valid
   struct thread *t = thread_current ();
-  
+
   if(!is_valid_memory_access(t->pagedir, f->esp)){
-      sys_exit(-1);
+    sys_exit(-1);
   }
   uint32_t callNo;
   uint32_t *user_esp = f->esp;
   uint32_t arg1, arg2, arg3;
-  
-  callNo = (uint32_t)(*user_esp);
-  //printf("call no %d",callNo);
 
-  // callNo == SYS_OPEN || callNo == SYS_REMOVE || callNo == SYS_EXIT || SYS_CREATE || SYS_WRITE
+  callNo = (uint32_t)(*user_esp);
+
+  // Only SYS_HALT needs no arguements
   if(callNo != SYS_HALT){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
@@ -61,9 +63,6 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   }
 
   //Below if is for sys calls that needs atleast 2 arguments
-  //callNo == SYS_CREATE || callNo == SYS_WRITE
-  // i.e filter out calls that needs only one arguments
-  // if( (callNo != SYS_HALT) && (callNo != SYS_OPEN) && (callNo != SYS_REMOVE) && (callNo != SYS_EXIT) && callNo != SYS_CLOSE && CALL ){
   if(callNo == SYS_CREATE || callNo == SYS_WRITE || callNo == SYS_READ){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
@@ -73,10 +72,6 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   }
 
   //Below if statement is for sys calls that needs atleast 3 arguements
-  // ie filter out SYS_HALT, SYS_OPEN, SYS_REMOVE, SYS_EXIT
-  //And use it only for
-  //callNo == SYS_WRITE, SYS_READ
-  // if( callNo != SYS_HALT && callNo != SYS_OPEN && callNo != SYS_REMOVE && callNo != SYS_EXIT && callNo != SYS_CREATE ){
   if(callNo == SYS_WRITE || callNo == SYS_READ){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
@@ -89,7 +84,6 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   switch(callNo){
 
   case SYS_HALT:
-    //shut down machine
     shutdown_power_off();
     break;
     
@@ -98,7 +92,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     }
-     if(!is_valid_memory_access(t->pagedir, arg1)){
+    if(!is_valid_memory_access(t->pagedir, (void *)arg1)){
       sys_exit(-1);
     }
     
@@ -110,15 +104,15 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       sys_exit(-1);
       break;
     }
-
-     if(!is_valid_memory_access(t->pagedir, arg1)){
+    
+      if(!is_valid_memory_access(t->pagedir, (void *)arg1)){
       sys_exit(-1);
     }
     f->eax =  sys_open ((char *)arg1);
     break;
 
   case SYS_READ:
-    if((void *)arg2 == NULL){
+    if((char *)arg2 == NULL){
       sys_exit(-1);
       break;
     }
@@ -151,6 +145,10 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 
   case SYS_FILESIZE:
        
+    if((int)arg1 >= t->nextFd){
+      sys_exit(-1);
+    }
+
     f->eax = sys_filesize((int)arg1);
     break;
    
@@ -169,10 +167,26 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     break;
     
   case SYS_EXIT:
-    //uint32_t status = (uint32_t)(arg3); //exit status
     sys_exit(arg1);
     break;
     
+  case SYS_EXEC:
+    if((char *)arg1 == NULL){
+      sys_exit(-1);
+      break;
+    }
+
+      if(!is_valid_memory_access(t->pagedir, (void *)arg1)){
+      sys_exit(-1);
+    }
+  
+    f->eax = sys_exec((char *)arg1);
+    break;
+
+  case SYS_WAIT:
+    f->eax = sys_wait((tid_t)arg1);
+    break;
+
   default:
     sys_exit(-1);
   }
@@ -283,7 +297,24 @@ void sys_exit (int status){
   thread_exit(); //cleanup and deallocation and waiting for parent to reap exit status
 }
 
+/*  Waits for a child process pid and retrieves the child's exit status.
+If pid is still alive, waits until it terminates. Then, returns the status that pid passed to exit. If pid did not call exit(), but was terminated by the kernel (e.g. killed due to an exception), wait(pid) must return -1. It is perfectly legal for a parent process to wait for child processes that have already terminated by the time the parent calls wait, but the kernel must still allow the parent to retrieve its child's exit status, or learn that the child was terminated by the kernel.
 
+  wait must fail and return -1 immediately if any of the following conditions is true:
+
+  pid does not refer to a direct child of the calling process. pid is a direct child of the calling process if and only if the calling process received pid as a return value from a successful call to exec.
+  Note that children are not inherited: if A spawns child B and B spawns child process C, then A cannot wait for C, even if B is dead. A call to wait(C) by process A must fail. Similarly, orphaned processes are not assigned to a new parent if their parent process exits before they do.
+
+																															   The process that calls wait has already called wait on pid. That is, a process may wait for any given child at most once.
+																 Processes may spawn any number of children, wait for them in any order, and may even exit without having waited for some or all of their children. Your design should consider all the ways in which waits can occur. All of a process's resources, including its struct thread, must be freed whether its parent ever waits for it or not, and regardless of whether the child exits before or after its parent.
+
+You must ensure that Pintos does not terminate until the initial process exits. The supplied Pintos code tries to do this by calling process_wait() (in userprog/process.c) from main() (in threads/init.c). We suggest that you implement process_wait() according to the comment at the top of the function and then implement the wait system call in terms of process_wait().
+
+Implementing this system call requires considerably more work than any of the rest.
+*/
+int sys_wait (tid_t pid){
+  return process_wait(pid);
+}
 /*
 Writes size bytes from buffer to the open file fd. Returns the number of bytes actually written, 
 which may be less than size if some bytes could not be written.
@@ -338,3 +369,11 @@ int sys_filesize (int fd){
 }
  
   
+/* Runs the executable whose name is given in cmd_line, passing any given arguments, and returns the new process's program id (pid).
+ Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
+ Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable. 
+ You must use appropriate synchronization to ensure this.*/
+tid_t sys_exec (const char *cmd_line){
+  return process_execute (cmd_line);
+}
+

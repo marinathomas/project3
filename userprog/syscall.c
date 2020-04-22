@@ -19,16 +19,17 @@ static struct lock file_lock;
 
 static void syscall_handler (struct intr_frame *);
 bool sys_create ( char *file, unsigned initial_size);
+void sys_seek (int fd, unsigned position);
 bool sys_remove ( char *file);
 int sys_open ( char *file);
 void sys_close( int fd);
 int sys_filesize( int fd);
 void sys_exit (int status);
 int sys_wait (tid_t pid);
+unsigned sys_tell (int fd);
 tid_t sys_exec (const char *cmd_line);
 int sys_write (int fd, void *buffer, unsigned size);
 int sys_read (int fd, void *buffer, unsigned size);
-bool is_valid_memory_access(uint32_t *pd, const void *vaddr );
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 
@@ -63,7 +64,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
   }
 
   //Below if is for sys calls that needs atleast 2 arguments
-  if(callNo == SYS_CREATE || callNo == SYS_WRITE || callNo == SYS_READ){
+  if(callNo == SYS_CREATE || callNo == SYS_WRITE || callNo == SYS_READ || callNo == SYS_SEEK){
     user_esp++;
     if(!is_valid_memory_access(t->pagedir, user_esp)){
       sys_exit(-1);
@@ -117,7 +118,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       break;
     }
 
-    if(arg3 !=0 && !put_user((uint8_t *)arg2,'a')){
+    if(!is_valid_memory_access(t->pagedir, (void *)arg2)){
       sys_exit(-1);
       break;
     }
@@ -164,6 +165,14 @@ static void syscall_handler (struct intr_frame *f UNUSED)
     }
     
     f->eax = sys_write((int)arg1, (char *)arg2, (unsigned )arg3);
+    break;
+
+  case SYS_TELL:
+    f->eax = sys_tell ((int)arg1);
+    break;
+
+  case SYS_SEEK:
+    sys_seek ((int)arg1, arg2);
     break;
     
   case SYS_EXIT:
@@ -222,6 +231,7 @@ checks for validity of the address
 */
 bool is_valid_memory_access(uint32_t *pd, const void *vaddr ){
   if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && vaddr > ((void *)CODE_PHYS_BASE) && pagedir_get_page (pd, vaddr) != NULL){
+    // if ( vaddr != NULL &&  vaddr < ((void *)LOADER_PHYS_BASE) && pagedir_get_page (pd, vaddr) != NULL){
     return true;
   } else {
     return false;
@@ -258,14 +268,15 @@ bool sys_remove ( char *file){
 */
 int sys_open ( char *name){
   lock_acquire (&file_lock);
-  struct file * new_file = filesys_open (name);
+  struct file *new_file = filesys_open (name);
   struct thread *curthread = thread_current();
 
   int cur_fd = -1;
-  if( (struct file *)new_file != NULL){
+  if(new_file != NULL){
     cur_fd = curthread->nextFd;
     curthread->nextFd = cur_fd +1;
-    curthread->fd_table[cur_fd] = *new_file;
+    curthread->fd_table[cur_fd] = new_file;
+    //curthread->curFile = new_file;
   }
   lock_release (&file_lock);
   return cur_fd;
@@ -277,9 +288,9 @@ int sys_read (int fd, void *buffer, unsigned size){
   int readVal = 0;
   if(fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
-    struct file  thisFile = curthread->fd_table[fd];
+    struct file  *thisFile = curthread->fd_table[fd];
     lock_acquire (&file_lock);
-    readVal =  file_read((struct file *)(&thisFile), buffer, size);
+    readVal =  file_read(thisFile, buffer, size);
     lock_release (&file_lock);
   }
   return readVal;
@@ -333,9 +344,9 @@ int sys_write (int fd, void *buffer, unsigned size){
   int retSize = 0;
   if(fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
-    struct file  wfile = curthread->fd_table[fd];
+    struct file  *wfile = curthread->fd_table[fd];
     lock_acquire (&file_lock);
-    retSize = file_write ((struct file *)&wfile, buffer, size);
+    retSize = file_write (wfile, buffer, size);
     lock_release (&file_lock);
   }
   return retSize;
@@ -345,11 +356,13 @@ int sys_write (int fd, void *buffer, unsigned size){
 void sys_close (int fd){
   if (fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
-    struct file  thisFile = curthread->fd_table[fd];
-    lock_acquire (&file_lock);
-    file_close ((struct file *)&thisFile);
-    lock_release (&file_lock);
-    //curthread->fd_table[fd] = NULL;
+    struct file  *fp = curthread->fd_table[fd];
+    if( (struct file *)fp != NULL){
+      lock_acquire (&file_lock);
+      file_close(fp);
+      lock_release (&file_lock);
+      curthread->fd_table[fd] = NULL;
+    }
   }
   
 }
@@ -359,16 +372,15 @@ int sys_filesize (int fd){
   int fileSize = 0;
   if (fd > STDOUT_FILENO){
     struct thread *curthread = thread_current();
-    struct file  thisFile = curthread->fd_table[fd];
+    struct file  *fp = curthread->fd_table[fd];
     lock_acquire (&file_lock);
-    fileSize =  file_length ((struct file *)&thisFile);
+    fileSize =  file_length (fp);
     lock_release (&file_lock);
-    //curthread->fd_table[fd] = NULL;
   }
   return fileSize;
 }
  
-  
+   
 /* Runs the executable whose name is given in cmd_line, passing any given arguments, and returns the new process's program id (pid).
  Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
  Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable. 
@@ -376,4 +388,32 @@ int sys_filesize (int fd){
 tid_t sys_exec (const char *cmd_line){
   return process_execute (cmd_line);
 }
+
+
+/*Changes the next byte to be read or written in open file fd to position, expressed in bytes from the beginning of the file. (Thus, a position of 0 is the file's start.)
+  A seek past the current end of a file is not an error. A later read obtains 0 bytes, indicating end of file. A later write extends the file, filling any unwritten gap with zeros. (However, in Pintos files have a fixed length until project 4 is complete, so writes past end of file will return an error.) These semantics are implemented in the file system and do not require any special effort in system call implementation.*/
+void sys_seek (int fd, unsigned position){
+  if (fd > STDOUT_FILENO){
+    struct thread *curthread = thread_current();
+    struct file  *fp = curthread->fd_table[fd];
+    lock_acquire (&file_lock);
+    file_seek(fp, position);
+    lock_release (&file_lock);
+  }
+
+}
+
+/*Returns the position of the next byte to be read or written in open file fd, expressed in bytes from the beginning of the file.*/
+unsigned sys_tell (int fd){
+  uint32_t postn = -1;
+  if (fd > STDOUT_FILENO){
+    struct thread *curthread = thread_current();
+    struct file  *fp = curthread->fd_table[fd];
+    lock_acquire (&file_lock);
+    postn =  file_tell (fp);
+    lock_release (&file_lock);
+  }
+  return postn;  
+}
+
 

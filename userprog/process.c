@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "syscall.h"
 
 #define LOGGING_LEVEL 6
 
@@ -76,7 +77,9 @@ process_execute (const char *command)
     palloc_free_page (cmd_cpy);
 
   struct thread *t = thread_by_id(tid);
-  cur->child_tid = tid;
+  int childNo = t->childNo;
+  cur->child_tid[childNo] = tid;
+  cur->childNo = childNo + 1;
   t->parent_tid = cur->tid;
   sema_init(&t->exiting, 0);
   sema_init(&t->reaped, 0);
@@ -137,11 +140,19 @@ process_wait (tid_t child_tid UNUSED)
     return -1;
   }
 
-  if(parent_t->waited == true){
-    return -1;
+  int i;
+  for(i=0; i<20; i++){
+    if(parent_t->waited_for[i] == 0){
+      parent_t->waited_for[i] = child_tid;
+      break;
+    }
+    if(parent_t->waited_for[i] == child_tid){
+      return -1;
+    }
   }
-
-  parent_t->waited =true;
+    /* if(parent_t->waited == true){
+    return -1;
+    }*/
   sema_down(&child_t->exiting);
   exit_status = child_t->exit_status;
   // here means child has exited, get child's exit status from its thread
@@ -314,8 +325,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   parseString(cmdcpy, " ", parsedcmd); 
   char *file_name = parsedcmd[0];
   file = filesys_open (file_name);
-  if (file == NULL)
-    {
+  if (file == NULL){
       printf ("load: %s: open failed\n", file_name);
       goto done;
     }
@@ -329,7 +339,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024)
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: open failed\n", file_name);
       goto done;
     }
 

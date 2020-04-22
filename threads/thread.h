@@ -98,10 +98,11 @@ struct thread
 
     struct semaphore exiting;
     struct semaphore reaped;
-    
-    tid_t child_tid;
+
+    int childNo;
+    tid_t child_tid[20];
     tid_t parent_tid;
-    bool waited;
+    tid_t waited_for[20];// = {0};
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;     /* Page directory. */
@@ -112,8 +113,8 @@ struct thread
     unsigned magic;                     /* Detects stack overflow. */
 
     int nextFd;
-    struct file fd_table[20];
-    
+    struct file *fd_table[20];
+    //struct file *curFile;
   };
 
 /* If false (default), use round-robin scheduler.

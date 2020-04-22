@@ -186,7 +186,11 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
   t->nextFd = 2;
-  
+  t->childNo = 0;
+  int i;
+  for(i=0; i<20; i++){
+    t->waited_for[i] = 0;
+  }  
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;

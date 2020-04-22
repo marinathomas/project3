@@ -18,13 +18,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "syscall.h"
 
 #define LOGGING_LEVEL 6
 
 #include <log.h>
-
-struct semaphore launched; // really belongs to the thread struct
-struct semaphore exiting; // really belongs to the thread struct
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -57,9 +55,8 @@ process_execute (const char *command)
     return TID_ERROR;
   strlcpy (cmd_cpy, command, PGSIZE);
   cmd_len = strlen(command) + 1;
-  
-  sema_init(&launched ,0); //t->launched later
-  sema_init(&exiting, 0);
+
+  struct thread *cur = thread_current ();
 
   int k;
   int z = 16;
@@ -78,7 +75,14 @@ process_execute (const char *command)
   tid = thread_create (name, PRI_DEFAULT, start_process, cmd_cpy);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_cpy);
-  sema_down(&launched);
+
+  struct thread *t = thread_by_id(tid);
+  int childNo = t->childNo;
+  cur->child_tid[childNo] = tid;
+  cur->childNo = childNo + 1;
+  t->parent_tid = cur->tid;
+  sema_init(&t->exiting, 0);
+  sema_init(&t->reaped, 0);
   
   return tid;
 }
@@ -93,7 +97,7 @@ start_process (void *command)
   bool success;
 
   log(L_TRACE, "start_process()");
-
+   
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -105,7 +109,6 @@ start_process (void *command)
   palloc_free_page (executable);
   if (!success)
     thread_exit ();
-  sema_up(&launched);
   
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -130,21 +133,44 @@ int
 process_wait (tid_t child_tid UNUSED)
 {
   // wait for the child to exit and reap the child's exit status
-  sema_down(&exiting);
+  struct thread *child_t = thread_by_id(child_tid);
+  struct thread *parent_t = thread_current();
+  int exit_status;
+  if(child_t == NULL ||child_t->parent_tid != parent_t->tid){
+    return -1;
+  }
+
+  int i;
+  for(i=0; i<20; i++){
+    if(parent_t->waited_for[i] == 0){
+      parent_t->waited_for[i] = child_tid;
+      break;
+    }
+    if(parent_t->waited_for[i] == child_tid){
+      return -1;
+    }
+  }
+    /* if(parent_t->waited == true){
+    return -1;
+    }*/
+  sema_down(&child_t->exiting);
+  exit_status = child_t->exit_status;
   // here means child has exited, get child's exit status from its thread
-  return child_tid;  // Added to fix  warning: control reaches end of non-void function [-Wreturn-type]	
+  sema_up(&child_t->reaped);
+
+  return exit_status;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
+  struct thread *child_t = thread_current ();
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = child_t->pagedir;
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -154,11 +180,13 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      child_t->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  sema_up(&exiting);
+  
+  sema_up(&child_t->exiting);
+  sema_down(&child_t->reaped);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -176,7 +204,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -297,8 +325,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   parseString(cmdcpy, " ", parsedcmd); 
   char *file_name = parsedcmd[0];
   file = filesys_open (file_name);
-  if (file == NULL)
-    {
+  if (file == NULL){
       printf ("load: %s: open failed\n", file_name);
       goto done;
     }
@@ -312,7 +339,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024)
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: open failed\n", file_name);
       goto done;
     }
 

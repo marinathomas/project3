@@ -77,12 +77,14 @@ process_execute (const char *command)
     palloc_free_page (cmd_cpy);
 
   struct thread *t = thread_by_id(tid);
+  sema_init(&t->launched, 0);
+  sema_init(&t->exiting, 0);
+  sema_init(&t->reaped, 0);
+  sema_down(&t->launched);
   int childNo = t->childNo;
   cur->child_tid[childNo] = tid;
   cur->childNo = childNo + 1;
   t->parent_tid = cur->tid;
-  sema_init(&t->exiting, 0);
-  sema_init(&t->reaped, 0);
   
   return tid;
 }
@@ -95,7 +97,7 @@ start_process (void *command)
   char *executable = command;
   struct intr_frame if_;
   bool success;
-
+  struct thread *child_t = thread_current();
   log(L_TRACE, "start_process()");
    
   /* Initialize interrupt frame and load executable. */
@@ -109,7 +111,7 @@ start_process (void *command)
   palloc_free_page (executable);
   if (!success)
     thread_exit ();
-  
+  sema_up(&child_t->launched);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -327,7 +329,8 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   file = filesys_open (file_name);
   if (file == NULL){
       printf ("load: %s: open failed\n", file_name);
-      goto done;
+      //goto done;
+      sys_exit(-1);
     }
 
   /* Read and verify executable header. */
@@ -413,7 +416,14 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);
+  t->current_exec = file;
+  if(file != NULL){
+    file_deny_write(file);
+  }else{
+     printf ("load: %s: open failed\n", file_name);
+     sys_exit(-1);
+  }
   return success;
 }
 

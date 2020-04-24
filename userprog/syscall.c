@@ -2,6 +2,7 @@
 #include <syscall-nr.h>
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "threads/interrupt.h"
@@ -30,8 +31,9 @@ unsigned sys_tell (int fd);
 tid_t sys_exec (const char *cmd_line);
 int sys_write (int fd, void *buffer, unsigned size);
 int sys_read (int fd, void *buffer, unsigned size);
-static int get_user (const uint8_t *uaddr);
-static bool put_user (uint8_t *udst, uint8_t byte);
+//static int get_user (const uint8_t *uaddr);
+//static bool put_user (uint8_t *udst, uint8_t byte);
+bool is_file_open (char *fileName);
 
 void syscall_init (void)
 {
@@ -155,11 +157,16 @@ static void syscall_handler (struct intr_frame *f UNUSED)
    
   case SYS_WRITE: //called to output to a file or STDOUT
 
-    if(get_user((uint8_t *)arg2) == -1){
+    /* if(get_user((uint8_t *)arg2) == -1){
       sys_exit(-1);
       break;
-     }
+      }*/
     if((int)arg1 >= t->nextFd){
+      sys_exit(-1);
+      break;
+    }
+
+    if(!is_valid_memory_access(t->pagedir, (void *)arg2)){
       sys_exit(-1);
       break;
     }
@@ -205,7 +212,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 /* Reads a byte at user virtual address UADDR.
 UADDR must be below PHYS_BASE.
 Returns the byte value if successful, -1 if a segfault
-occurred. */
+occurred. 
 static int
 get_user (const uint8_t *uaddr)
 {
@@ -213,10 +220,10 @@ get_user (const uint8_t *uaddr)
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
        : "=&a" (result) : "m" (*uaddr));
   return result;
-}
+  }*/
 /* Writes BYTE to user address UDST.
 UDST must be below PHYS_BASE.
-Returns true if successful, false if a segfault occurred. */
+Returns true if successful, false if a segfault occurred. 
 static bool
 put_user (uint8_t *udst, uint8_t byte)
 {
@@ -224,7 +231,7 @@ put_user (uint8_t *udst, uint8_t byte)
   asm ("movl $1f, %0; movb %b2, %1; 1:"
        : "=&a" (error_code), "=m" (*udst) : "q" (byte));
   return error_code != -1;
-}
+  }*/
 
 /*
 checks for validity of the address
@@ -305,6 +312,9 @@ void sys_exit (int status){
   struct thread *curthread = thread_current();
   curthread->exit_status = status;
   printf ("%s: exit(%d)\n", curthread->name, status);
+  if(curthread->current_exec != NULL){
+    file_close(curthread->current_exec);
+  }
   thread_exit(); //cleanup and deallocation and waiting for parent to reap exit status
 }
 
@@ -379,13 +389,40 @@ int sys_filesize (int fd){
   }
   return fileSize;
 }
- 
+
+/*checks if the file is already open */
+/* Returns the size, in bytes, of the file open as fd.*/
+bool is_file_open (char *name){
+  /* struct thread *curthread = thread_current();
+  int k;
+  for(k=0; k<20; k++){
+    struct file  *fp = curthread->fd_table[k];
+    if(fp != NULL && strcmp(fp->inode->name, fileName) == 0){
+      return true;
+    }
+  }
+  return false;*/
+  struct dir *dir = dir_open_root ();
+  struct inode *inode = NULL;
+  bool isOpen = false;
+  if (dir != NULL){
+    if( dir_lookup (dir, name, &inode)){
+      isOpen = true;
+    }
+    dir_close (dir); 
+  }
+  return isOpen;
+}
+
    
 /* Runs the executable whose name is given in cmd_line, passing any given arguments, and returns the new process's program id (pid).
  Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
  Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable. 
  You must use appropriate synchronization to ensure this.*/
 tid_t sys_exec (const char *cmd_line){
+  //if(is_file_open(cmd_line)){
+  //    sys_exit(-1);
+  // }
   return process_execute (cmd_line);
 }
 

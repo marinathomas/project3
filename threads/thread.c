@@ -185,7 +185,7 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-  t->nextFd = 3;// STDERR_FILENO + 1;
+  t->nextFd = STDERR_FILENO + 1;
   t->childNo = 0;
   int i;
   for(i=0; i<20; i++){
@@ -593,8 +593,6 @@ uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 /* Return a thread based off tid. */
 struct thread * thread_by_id(tid_t tid){
   struct list_elem *e;
-
-  // ASSERT (intr_get_level () == INTR_OFF);
 
   for (e = list_begin (&all_list); e != list_end (&all_list);
        e = list_next (e))

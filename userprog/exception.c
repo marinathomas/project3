@@ -123,7 +123,6 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f)
 {
-  //  sys_exit(-1);
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */

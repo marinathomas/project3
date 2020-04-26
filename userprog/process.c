@@ -83,7 +83,7 @@ process_execute (const char *command)
     sema_down(&t->launched);
     if (!t->launch_success){
       tid = TID_ERROR;
-      //t->tid = TID_ERROR;
+      t->tid = TID_ERROR;
       //palloc_free_page (cmd_cpy);
     }
       // }else{
@@ -145,9 +145,6 @@ int
 process_wait (tid_t child_tid UNUSED)
 {
   // wait for the child to exit and reap the child's exit status
-  if(child_tid == TID_ERROR){
-    return -1;
-  }
   struct thread *child_t = thread_by_id(child_tid);
   struct thread *parent_t = thread_current();
   int exit_status;
@@ -165,12 +162,9 @@ process_wait (tid_t child_tid UNUSED)
       return -1;
     }
   }
-    /* if(parent_t->waited == true){
-    return -1;
-    }*/
   sema_down(&child_t->exiting);
-  exit_status = child_t->exit_status;
   // here means child has exited, get child's exit status from its thread
+  exit_status = child_t->exit_status;
   sema_up(&child_t->reaped);
 
   return exit_status;
@@ -200,10 +194,8 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
-  //if(child_t->launch_success){
     sema_up(&child_t->exiting);
     sema_down(&child_t->reaped);
-    //}
 }
 
 /* Sets up the CPU for running user code in the current
@@ -342,11 +334,11 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   parseString(cmdcpy, " ", parsedcmd); 
   char *file_name = parsedcmd[0];
   file = filesys_open (file_name);
-  if (file == NULL){
+  if (file == NULL)
+    {
       printf ("load: %s: open failed\n", file_name);
       goto done;
-      //sys_exit(-1);
-    }
+  }
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -431,18 +423,15 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  //file_close (file);
   if(file != NULL){
     t->current_exec = file;
     file_deny_write(file);
   }else{
-    //printf ("load: %s: open failed\n", file_name);
-     //sys_exit(-1);
     success = false;
   }
   return success;
 }
-
+
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);

@@ -293,7 +293,7 @@ int sys_open ( char *name){
 
 int sys_read (int fd, void *buffer, unsigned size){
   int readVal = 0;
-  if(fd > STDOUT_FILENO){
+  if(fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *thisFile = curthread->fd_table[fd];
     lock_acquire (&file_lock);
@@ -311,7 +311,11 @@ Conventionally, a status of 0 indicates success and nonzero values indicate erro
 void sys_exit (int status){
   struct thread *curthread = thread_current();
   curthread->exit_status = status;
-  printf ("%s: exit(%d)\n", curthread->name, status);
+  if(status != -2){
+    printf ("%s: exit(%d)\n", curthread->name, status);
+  }else {
+    printf ("%s: exit(%d)\n", curthread->name, -1);
+  }
   if(curthread->current_exec != NULL){
     file_close(curthread->current_exec);
   }
@@ -352,7 +356,7 @@ int sys_write (int fd, void *buffer, unsigned size){
     return size;
   }
   int retSize = 0;
-  if(fd > STDOUT_FILENO){
+  if(fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *wfile = curthread->fd_table[fd];
     lock_acquire (&file_lock);
@@ -364,7 +368,7 @@ int sys_write (int fd, void *buffer, unsigned size){
 
 /* Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one.*/
 void sys_close (int fd){
-  if (fd > STDOUT_FILENO){
+  if (fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *fp = curthread->fd_table[fd];
     if( (struct file *)fp != NULL){
@@ -380,7 +384,7 @@ void sys_close (int fd){
 /* Returns the size, in bytes, of the file open as fd.*/
 int sys_filesize (int fd){
   int fileSize = 0;
-  if (fd > STDOUT_FILENO){
+  if (fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *fp = curthread->fd_table[fd];
     lock_acquire (&file_lock);
@@ -430,7 +434,7 @@ tid_t sys_exec (const char *cmd_line){
 /*Changes the next byte to be read or written in open file fd to position, expressed in bytes from the beginning of the file. (Thus, a position of 0 is the file's start.)
   A seek past the current end of a file is not an error. A later read obtains 0 bytes, indicating end of file. A later write extends the file, filling any unwritten gap with zeros. (However, in Pintos files have a fixed length until project 4 is complete, so writes past end of file will return an error.) These semantics are implemented in the file system and do not require any special effort in system call implementation.*/
 void sys_seek (int fd, unsigned position){
-  if (fd > STDOUT_FILENO){
+  if (fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *fp = curthread->fd_table[fd];
     lock_acquire (&file_lock);
@@ -443,7 +447,7 @@ void sys_seek (int fd, unsigned position){
 /*Returns the position of the next byte to be read or written in open file fd, expressed in bytes from the beginning of the file.*/
 unsigned sys_tell (int fd){
   uint32_t postn = -1;
-  if (fd > STDOUT_FILENO){
+  if (fd > STDERR_FILENO){
     struct thread *curthread = thread_current();
     struct file  *fp = curthread->fd_table[fd];
     lock_acquire (&file_lock);

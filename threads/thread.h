@@ -114,6 +114,7 @@ struct thread
     unsigned magic;                     /* Detects stack overflow. */
 
     int nextFd;
+    bool launch_success;
     struct file *fd_table[20];
     struct file *current_exec;
   };

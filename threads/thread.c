@@ -185,7 +185,7 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-  t->nextFd = 2;
+  t->nextFd = 3;// STDERR_FILENO + 1;
   t->childNo = 0;
   int i;
   for(i=0; i<20; i++){

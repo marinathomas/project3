@@ -98,6 +98,7 @@ struct thread
 
     struct semaphore exiting;
     struct semaphore reaped;
+    struct semaphore launched;
 
     int childNo;
     tid_t child_tid[20];

@@ -24,7 +24,6 @@
 #define LOGGING_LEVEL 6
 
 #include <log.h>
-struct semaphore launched;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 void parseString(char* inputString, const char* delim, char** retString);
@@ -61,9 +60,7 @@ process_execute (const char *command)
 
   struct thread *cur = thread_current ();
 
-  sema_init(&launched, 0);
-
-    int k;
+  int k;
   int z = 16;
   if(cmd_len < 16){
     z = cmd_len;
@@ -88,8 +85,9 @@ process_execute (const char *command)
   t->parent_tid = cur->tid;
   sema_init(&t->exiting, 0);
   sema_init(&t->reaped, 0);
+  sema_init(&t->launched, 0);
+  sema_down(&t->launched);
 
-  sema_down(&launched);
   return tid;
 }
 
@@ -110,12 +108,16 @@ start_process (void *command) {
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(executable, &if_.eip, &if_.esp);
 
+    // Get current thread to use for the launched semaphore
+    struct thread *cur = thread_current ();
+
     /* If load failed, quit. */
     palloc_free_page(executable);
     if (!success)
         thread_exit();
 
-    sema_up(&launched);
+    sema_up(&cur->launched);
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -421,7 +423,10 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  if (success)
+      file_deny_write (file);
+  else
+    file_close (file);
   return success;
 }
 

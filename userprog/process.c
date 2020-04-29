@@ -19,15 +19,18 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 #include "syscall.h"
+#include "threads/synch.h"
 
 #define LOGGING_LEVEL 6
 
 #include <log.h>
-
+struct semaphore launched;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 void parseString(char* inputString, const char* delim, char** retString);
 int lengthOfParsedString(char** parsedString);
+
+//extern struct lock lock_file;
 
 	/* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -58,7 +61,9 @@ process_execute (const char *command)
 
   struct thread *cur = thread_current ();
 
-  int k;
+  sema_init(&launched, 0);
+
+    int k;
   int z = 16;
   if(cmd_len < 16){
     z = cmd_len;
@@ -83,33 +88,34 @@ process_execute (const char *command)
   t->parent_tid = cur->tid;
   sema_init(&t->exiting, 0);
   sema_init(&t->reaped, 0);
-  
+
+  sema_down(&launched);
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *command)
-{
-  char *executable = command;
-  struct intr_frame if_;
-  bool success;
+start_process (void *command) {
+    char *executable = command;
+    struct intr_frame if_;
+    bool success;
 
-  log(L_TRACE, "start_process()");
-   
-  /* Initialize interrupt frame and load executable. */
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (executable, &if_.eip, &if_.esp);
+    log(L_TRACE, "start_process()");
 
-  /* If load failed, quit. */
-  palloc_free_page (executable);
-  if (!success)
-    thread_exit ();
-  
+    /* Initialize interrupt frame and load executable. */
+    memset(&if_, 0, sizeof if_);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    success = load(executable, &if_.eip, &if_.esp);
+
+    /* If load failed, quit. */
+    palloc_free_page(executable);
+    if (!success)
+        thread_exit();
+
+    sema_up(&launched);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -135,6 +141,7 @@ process_wait (tid_t child_tid UNUSED)
   // wait for the child to exit and reap the child's exit status
   struct thread *child_t = thread_by_id(child_tid);
   struct thread *parent_t = thread_current();
+
   int exit_status;
   if(child_t == NULL ||child_t->parent_tid != parent_t->tid){
     return -1;
@@ -326,7 +333,8 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   char *file_name = parsedcmd[0];
   file = filesys_open (file_name);
   if (file == NULL){
-      printf ("load: %s: open failed\n", file_name);
+      //printf ("load open executable: %s: open failed \n", file_name);
+      printf ("load: %s: open failed", file_name);
       goto done;
     }
 

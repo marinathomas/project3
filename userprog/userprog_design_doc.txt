@@ -8,8 +8,8 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@utexas.edu>
-FirstName LastName <email@utexas.edu>
+Marina Thomas <marina.thomas@utexas.edu>
+Smita Rao <rao.smita@utexas.edu>
 
 ---- PRELIMINARIES ----
 
@@ -18,6 +18,8 @@ FirstName LastName <email@utexas.edu>
 >> Please cite any offline or online sources you consulted while
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
+
+**** Make note about GDBMACROS=/home/ubuntu/project3/utils/gdb-macros***
 
                            ARGUMENT PASSING
                            ================

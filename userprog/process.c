@@ -84,14 +84,11 @@ process_execute (const char *command)
     if (!t->launch_success){
       tid = TID_ERROR;
       t->tid = TID_ERROR;
-      //palloc_free_page (cmd_cpy);
     }
-      // }else{
-      int childNo = cur->childNo;
-      cur->child_tid[childNo] = tid;
-      cur->childNo = childNo + 1;
-      t->parent_tid = cur->tid;
-      // }
+    int childNo = cur->childNo;
+    cur->child_tid[childNo] = tid;
+    cur->childNo = childNo + 1;
+    t->parent_tid = cur->tid;
   }
   return tid;
 }
@@ -116,12 +113,13 @@ start_process (void *command)
 
   /* If load failed, quit. */
   palloc_free_page (executable);
+  child_t->launch_success = success;
   sema_up(&child_t->launched);
   if (!success){
-    child_t->launch_success = false;
+    //child_t->launch_success = false;
     sys_exit(-1);
   }
-  child_t->launch_success = true;
+  //child_t->launch_success = true;
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its

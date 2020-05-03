@@ -6,8 +6,8 @@
 
 ---- GROUP ----
 
-Marina Thomas <marina.thomas@utexas.edu>
-Smita Rao <rao.smita@utexas.edu>
+Marina Thomas (MT34799) <marina.thomas@utexas.edu>
+Smita Rao (SR44739) <rao.smita@utexas.edu>
 
 ---- PRELIMINARIES ----
 
@@ -17,7 +17,7 @@ Smita Rao <rao.smita@utexas.edu>
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
-GDBMACROS was edited to have the absolute path as below
+GDBMACROS was edited to have the absolute path to have pintos working. Example below
 GDBMACROS=/home/ubuntu/project3/utils/gdb-macros
 
 
@@ -44,29 +44,30 @@ main() calls the method run_actions(). run_actions() calls run_task() that calls
 
 process_execute(const char *file_name) initially indicated to be taking in a file name. This was changed to process_execute (const char *command). 
 
-When process_execute runs, it spawns a thread. The initial method for the newly spawned thread is start_process(). start_process() calls load() method. load() loads the ELF executable into current thread. 
+When process_execute runs, it spawns a new thread. The initial method for the newly spawned thread is start_process(). start_process() calls load() method. load() loads the ELF executable into current thread and setup the stack.However, stack setup code did nothing in the original code. 
 
 In order to implement argument passing, the below changes had to be done.
 1. Pass the entire command to process_execute, rather than just the file name. 
 2. The entire command is then passed into start_process and eventually into load method.
 3. load() method calls setup_stack() after loading the ELF binary.
 4. The signature of setup_stack was modified to accept the command string.
-5. The command was parsed into tokens by dividing the words at spaces. The parsed string(tokens) is then placed in memory starting from PHYS_BASE following the x86 memory layout format.
-    a) Each parsed string or token is null terminated.
+5. The command was parsed into different tokens(arguments)  by dividing the words at spaces. The parsed string(arguments) is then placed in memory starting from PHYS_BASE following the x86 memory layout format.
+    a) Each parsed string or argument is null terminated.
     b) The last string is first placed on the stack at location PHYS_BASE - (lengthOf(current token)) +1
     c) +1 is added to consider the null termination.
-    d) The second last is then placed accordingly into the memory.
-    e) Once all the tokens(i.e arguments) are placed, the memory is word aligned. While address of each argument is captured while the argument is placed in memory so that it can be later put on the stack
+    d) The second last is then placed accordingly into the memory. Similarly all the arguments are placed on the stack.
+    e) Once all the tokens(i.e arguments) are placed, the memory is word aligned. Address of each argument is captured in an array while the argument is placed in memory so that it can be later put on the stack.
     f) An empty word is inserted to indicate there are no more arguments.
     g) Next the address to each token(argument) is placed in memory starting from the last argument.
     h) Once the address of all tokens are placed in memory, the address to the array argv is placed, which is nothing but the address that holds the address to argv[0]
     i) Next argc is placed in memory.
-    j) Running an ELF binary does not have to return and hence return adress is put as null
+    j) Running an ELF binary does not have to return and hence return adress is put as null.
 
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
-The signature of strtok is har *strtok(char *str, const char *delim);
+Below is extracted by referrencing Pointos man page.
+The signature of strtok is char *strtok(char *str, const char *delim);
 The signature of strtok_r is char *strtok_r(char *str, const char *delim, char **saveptr);
 
 strtok_r() accepts an additional argument which is a pointer to an array that stores the parsed strings.
@@ -90,13 +91,14 @@ struct semaphore launched;
 struct semaphore exiting;
 struct semaphore reaped;
 
-The above 3 semaphores were added to implement synchronization. Once the code to launch the new thread is executed by the parent, it does a sema_down on launched to make sure it waits until the child process is launched. Once the child thread is launched, but before the interrupt call to execute the ELF binary, the child process does a sema_up on launched.
+The above 3 semaphores were added to implement synchronization. Once the code to launch the new thread is executed by the parent, it does a sema_down on 'launched' to make sure it waits until the child process is launched. Once the child thread is launched, but before the interrupt call to execute the ELF binary, the child process does a sema_up on 'launched'.
 
-Once the child process is launched, the 'wait' is called on parent process. The parent does a sema_down on 'exiting' semaphore to wait for the child to be done with the execution. Once the child is done with the execution, it does a sema_up on 'exiting', and does a sema_down on reaped. Thus the child is now put on a wait. The parent continues at sema_up on 'exiting', reaps the status of the child and calls sema_up on 'reaped'.
+Once the child process is launched, the 'wait' is called on parent process. The parent does a sema_down on 'exiting' semaphore to wait for the child to finish the execution. Once the child finishes execution, it does a sema_up on 'exiting', and does a sema_down on 'reaped'. Thus the child is now put on a wait. The parent continues at sema_up on 'exiting', reaps the status of the child and calls sema_up on 'reaped'.
 
-In short, launched semaphore is make sure that the child is launched before the parent goes for wait.
-exiting semaphore is used for the parent to wait until the child is done.
-reaped semaphore is added to make sure that the parent gets to reap the child status before the child exits and its pagetable is cleared.
+In short, 
+   - launched semaphore is to make sure that the child is launched before wait is called on parent. Without this semaphore, the parent will exit before the child is launched.
+   - exiting semaphore is used for the parent to wait until the child is done.
+   - reaped semaphore is added to make sure that the parent gets to reap the child status before the child exits and its pagetable is cleared.
 
 int childNo;
 Used to track the number of children spawned by parent.
@@ -112,21 +114,22 @@ tracks all the child_tids that the parent has waited for. This helps us to ensur
 
 
 int32_t exit_status;
-captures exit status of the thread.
+captures exit status of the thread. This will later be reaped by the parent.
 
 int nextFd;
-captures the next file descriptor number. Initialized to 3 to accommodate for STD_IN, STD_OUT and STD_ERR
+captures the next file descriptor number. Initialized to 3 in thread_create to accommodate for STD_IN, STD_OUT and STD_ERR and is later incremented and stored when a file is open.
 
 bool launch_success;
 boolean flag to capture if the thread was launched successfully.
 
 struct file *fd_table[20];
-File Descriptor table
+File Descriptor table. Contains pointers to open files. The position of the file in this structure is returned to the caller as file descriptor.
 
 struct file *current_exec;
-Captures the file that is currently being executed by the thread.
+Captures the file that is currently being executed by the thread.This will help us deny writes to executables.
     
 Modified syscall.c to add the below
+--------------------------------------
 static struct lock file_lock;
 Global lock for file system operations.
 
@@ -134,15 +137,15 @@ Global lock for file system operations.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
 
-The file descriptor table was created by adding a struct of array of file pointers to thread. An integer 'nextFd' captures the file descriptor number that is to be assigned to the file that is being opened. Once the file is opened the file pointer is added to file descriptor table at 'nextFd' th location. nextFd is then incremented. When the file is closed, the entry in file descriptor table is made empty. 
-File descriptors are not unique to the entire OS. The table is defined within a thread struct and hence is unique only to the thread/process.
+The file descriptor table was created by adding to thread struct, a struct of array of file pointers. An integer 'nextFd' captures the file descriptor number that is to be assigned to the file that is being opened. Once the file is opened, the file pointer is added to file descriptor table at 'nextFd'-th location. nextFd is then incremented and stored. When the file is closed, the entry in file descriptor table is set to NULL.
+ 
+In current implementation, file descriptors are not unique to the entire OS. The table is defined within a thread struct and hence is unique only to the thread/process.
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
-The code ensures validity of the user pointer by ensuring that the address is less that PHYS_BASE and by using pagedir_get_page() in pagedir that helps check if the user address is valid.
-The code terminates any offending process.
+The code ensures validity of the user pointer by ensuring that the address is less that PHYS_BASE and by using the function  pagedir_get_page() in pagedir file. This function helps to check if the user address is valid. When an invalid user address is found, the system terminates the offending process.
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -151,14 +154,16 @@ The code terminates any offending process.
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
-wait system call, calls process_wait(). 
-process_wait receives the child pid.
+
+Wait system call, calls process_wait(). 
+process_wait() receives the child pid.
 The implementation checks the list of child processes for the current process to check if the received pid is indeed a child of current process. If not wait exits with -1. 
-If the tid is of a child process of the running process, the parent calls sema_down on exiting semaphore to wait for the child process to be done with execution.
-When the child is done processing, it calls sema_up on exiting and wakes up the parent. The child then calls sema_down on reaped to wait for the parent to reap the exit status.
-Parent reaps the exit status and calls sema_up on reaped and wake up the child to completly exit or terminate.
+If the tid is of a child process of the running process, the parent calls sema_down on 'exiting' semaphore to wait for the child process to finish execution.
+When the child process exits, it calls sema_up on 'exiting' and wakes up the parent. The child then calls sema_down on 'reaped' to wait for the parent to reap the exit status.
+Parent reaps the exit status and calls sema_up on 'reaped' and wakes up the child. The child then terminates.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -174,9 +179,13 @@ Parent reaps the exit status and calls sema_up on reaped and wake up the child t
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
-Following the direction given in the documentation, the code uses pagedir_get_page of pagedir.c to check if the address has been mapped. the code also checks that the user specified address is less than PHYS_BASE. Any offending process is terminated with an exit status of -1. exit system call calls thread_exit which takes care of the clean up.
+Following the direction given in the documentation, 
+    1. The code checks if the pointer in the syscall_handler is below PHYS_BASE.
+    2. The code also checks if the pointer requested belongs to the virtual memory of the current thread. The code uses pagedir_get_page of pagedir.c to check if the address has been mapped. The pointer to the page directory of the the thread and the pointer to be validated is passed to pagedir_get_page function. If the pointer is invalid NULL is returned.
+    3. Any offending process is terminated with an exit status of -1. 
+    4. For termination of the offending process, exit system call is made with a status of -1. exit calls thread_exit which takes care of the clean up.
 
-The method added is is_valid_memory_access and is widely used in syscall.c
+A new function called is_valid_memory_access was added to syscall.c  and is widely used in system calls.
 
 ---- SYNCHRONIZATION ----
 
@@ -185,9 +194,15 @@ The method added is is_valid_memory_access and is widely used in syscall.c
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
 
-The load success/failure is passed back to the caller process by using a new boolean variable called launch_success that was introduced to struct thread. It is set to false if load fails. 
+In our implementation, the load success/failure is passed back to the caller process by using a new boolean variable called 'launch_success' that was introduced to struct thread. It is set to false if load fails. 
 
-The code for load, the process is not terminated for error related to loading. When an error occurs, the load status is captured as a boolean flag, the error is logged and the control is directed to the Done" block. In the done block, the load status is interrogated and appropriate actions are taken.
+In function load, the process is not terminated for error related to loading. When an error occurs, the load status is captured as a boolean flag, the error is logged and the control is directed to the 'Done' block. In the 'Done' block, the load status is interrogated and appropriate actions are take and load status is returned to the caller i.e start_process() function. 
+
+Once load returns, in start_process() function,
+    1. The boolean variable 'launch_success' that was added by our implementation is populated with the load() status.
+    2. sema_up is called on 'launched' semaphore.
+    3. If the load failed, the child thread that failed to load the ELF binary is terminated by calling sys_exit with -1 status. This will then take care of any clean up to be done.
+    4. sema_up on 'launched' will wake up the parent or the calling thread. It checks for the 'launch_success' variable and sets tid to TID_ERROR if the launch failed. The parent then continues its flow and terminates gracefully. 
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -197,23 +212,29 @@ The code for load, the process is not terminated for error related to loading. W
 >> there any special cases?
 
 The above cases are handled using 3 semaphores. launched, exiting and reaped.
-These 3 semaphores were added to implement synchronization. Once the code to launch the new thread is executed by the parent, it does a sema_down on launched to make sure it waits until the child process is launched. Once the child thread is launched, but before the interrupt call to execute the ELF binary, the child process does a sema_up on launched.
+These 3 semaphores were added to implement synchronization. 
+    struct semaphore exiting;
+    struct semaphore reaped;
+    struct semaphore launched;
 
-Once the child process is launched, the 'wait' is called on parent process. The parent does a sema_down on 'exiting' semaphore to wait for the child to be done with the execution. Once the child is done with the execution, it does a sema_up on 'exiting', and does a sema_down on reaped. Thus the child is now put on a wait. The parent continues at sema_up on 'exiting', reaps the status of the child and calls sema_up on 'reaped'.
+Once the code to launch the new thread is executed by the parent, it does a sema_down on 'launched' to make sure it waits until the child process is launched. Once the child thread is launched, but before the interrupt call to execute the ELF binary, the child process does a sema_up on launched.
 
-In short, launched semaphore is make sure that the child is launched before the parent goes for wait.
-exiting semaphore is used for the parent to wait until the child is done.
-reaped semaphore is added to make sure that the parent gets to reap the child status before the child exits and its pagetable is cleared.
+Once the child process is launched, the 'wait' is called on parent process. The parent does a sema_down on 'exiting' semaphore to wait for the child to be done with the execution. Once the child is done with the execution, it does a sema_up on 'exiting', and does a sema_down on 'reaped'. Thus the child is now put on a wait. The parent continues at sema_up on 'exiting', reaps the status of the child and calls sema_up on 'reaped'.
+
+In short, 
+    - launched semaphore is make sure that the child is launched before the parent goes for wait.
+    - exiting semaphore is used for the parent to wait until the child is done.
+    - reaped semaphore is added to make sure that the parent gets to reap the child status before the child exits and its pagetable is cleared.
 
 When P calls wait(C) before C exits?  
-The code has a sema_down on exiting semaphore and P will wait unti sema_up is called by C.
-C calls this only after it is done with the processing.
+The code has a sema_down on exiting semaphore and P will wait until sema_up is called by C.
+C calls sema_up on exiting only after it is done with the processing.
 
 After C exits?
-Before C exits, it calls a sema_up on exiting. Hence it is ok for P to call wait after C is done processing as the sema_down on exiting will not cause a wait, but will let the process to continue. C however calls sema_down on reaped and hence cannot exit before the status us reaped by P. 
+Before C exits, it calls a sema_up on exiting. Hence it is ok for P to call wait after C is done processing as the sema_down on 'exiting' will not cause a wait, but will let the process to continue. C however calls sema_down on reaped and hence cannot exit before the status us reaped by P. 
 
 How do you ensure that all resources are freed in each case?  
-At exit, thread_exit is called which ensures proper clean up.
+At exit, thread_exit is called which ensures proper clean up. Also, child calls sema_down on 'reaped' to make sure that parent gets to reap the exit status. Parent reaps the exit status and calls sema_up on 'reaped' and thus allows the child to be cleaned up.
 
 How about when P terminates without waiting, before C exits?  After C exits?  Are there any special cases?
 If P terminates before C exits, C is orphaned.
@@ -223,13 +244,18 @@ If P terminates before C exits, C is orphaned.
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
+Bad pointers are to be expected from user code and kernel needs to be protected. Hence validations were put in place to ensure that the pointer passed in is valid.
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
-Disadvantage - File descriptor number might run out as I am not cycling though the numbers.
+Disadvantage - File descriptor number might run out as I am not cycling though the numbers. 
+File descriptors are not unique at OS level.
+
+Advantage - This is a simple implementation for the current need.
 
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+We can have distinctive threads and processes.
 
                            SURVEY QUESTIONS
                            ================
@@ -242,15 +268,22 @@ the semester.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+This was a difficult assignment. I am glad that I got time to join the office hours and get clarifications. I think some of the clarifications that I received would have been good to have in the assignment instructions itself.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+None particular. Entire project was useful.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
+Yes, definitely more hint will help, specifically regarding, denying writes to executable(the approach to be followed), hint on exec and wait, (ie, it is merely calls to process_execute and process_wait.
+The starter code done by the professor as part of the class was very helpful.
 
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
+None
 
 >> Any other comments?
+None
+
